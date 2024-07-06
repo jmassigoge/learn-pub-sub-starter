@@ -12,6 +12,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+//Go to the RabbitMQ management UI at http://localhost:15672 and navigate to the "Exchanges" tab.
+//Create a new exchange called peril_direct with the type direct.
+//Create a new exchange with type topic, and name it peril_topic.
+
 func main() {
 	const rabbitConnString = "amqp://guest:guest@localhost:5672/"
 

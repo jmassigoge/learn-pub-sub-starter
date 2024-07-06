@@ -17,17 +17,6 @@ const (
 	SimpleQueueTransient
 )
 
-func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
-	dat, err := json.Marshal(val)
-	if err != nil {
-		return err
-	}
-	return ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp.Publishing{
-		ContentType: "application/json",
-		Body:        dat,
-	})
-}
-
 func DeclareAndBind(
 	conn *amqp.Connection,
 	exchange,
@@ -63,4 +52,47 @@ func DeclareAndBind(
 		return nil, amqp.Queue{}, fmt.Errorf("could not bind queue: %v", err)
 	}
 	return ch, queue, nil
+}
+
+func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
+	dat, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+	return ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp.Publishing{
+		ContentType: "application/json",
+		Body:        dat,
+	})
+}
+
+func SubscribeJSON[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T),
+) error {
+	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
+	if err != nil {
+		return err
+	}
+	consumerChannel, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("could not consume queue: %v", err)
+	}
+	go func() {
+		for msg := range consumerChannel {
+			var val T
+			err := json.Unmarshal(msg.Body, &val)
+			if err != nil {
+				fmt.Printf("could not unmarshal message: %v", err)
+				msg.Nack(false, false)
+				continue
+			}
+			handler(val)
+			msg.Ack(false)
+		}
+	}()
+	return nil
 }
