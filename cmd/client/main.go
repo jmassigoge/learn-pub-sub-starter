@@ -21,24 +21,18 @@ func main() {
 	defer conn.Close()
 	fmt.Println("Peril game client connected to RabbitMQ!")
 
+	publishChannel, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("could not open channel: %v", err)
+	}
+
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
 		log.Fatalf("could not get username: %v", err)
 	}
 
-	/* 	_, queue, err := pubsub.DeclareAndBind(
-	   		conn,
-	   		routing.ExchangePerilDirect,
-	   		routing.PauseKey+"."+username,
-	   		routing.PauseKey,
-	   		pubsub.SimpleQueueTransient,
-	   	)
-	   	if err != nil {
-	   		log.Fatalf("could not subscribe to pause: %v", err)
-	   	}
-	   	fmt.Printf("Queue %v declared and bound!\n", queue.Name) */
-
 	gs := gamelogic.NewGameState(username)
+	pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+username, routing.ArmyMovesPrefix+"."+"*", pubsub.SimpleQueueTransient, handlerMove(gs))
 	pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, routing.PauseKey+"."+username, routing.PauseKey, pubsub.SimpleQueueTransient, handlerPause(gs))
 	for {
 		words := gamelogic.GetInput()
@@ -47,13 +41,17 @@ func main() {
 		}
 		switch words[0] {
 		case "move":
-			_, err := gs.CommandMove(words)
+			mv, err := gs.CommandMove(words)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
-
-			// TODO: publish the move
+			err = pubsub.PublishJSON(publishChannel, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+username, mv)
+			if err != nil {
+				log.Fatalf("could not publish message: %v", err)
+				continue
+			}
+			fmt.Printf("Moved %v units to %s\n", len(mv.Units), mv.ToLocation)
 		case "spawn":
 			err = gs.CommandSpawn(words)
 			if err != nil {
@@ -80,5 +78,12 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 	return func(ps routing.PlayingState) {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(am gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(am)
 	}
 }
